@@ -5,7 +5,7 @@ import json
 import textwrap
 
 import logging
-# logging.basicConfig(level = logging.INFO)
+logging.basicConfig(level = logging.INFO)
 
 from websockets.sync.server import serve
 
@@ -34,6 +34,7 @@ class TranscriptionServer:
     RATE = 16000
 
     def __init__(self):
+        logging.info("Initializing Transcription Server.")
         # voice activity detection model
         self.vad_model = VoiceActivityDetection()
         self.vad_threshold = 0.4
@@ -64,7 +65,7 @@ class TranscriptionServer:
     def recv_audio(self, websocket):
         """
         Receive audio chunks from a client in an infinite loop.
-        
+
         Continuously receives audio frames from a connected client
         over a WebSocket connection. It processes the audio frames using a
         voice activity detection (VAD) model to determine if they contain speech
@@ -78,7 +79,7 @@ class TranscriptionServer:
 
         Args:
             websocket (WebSocket): The WebSocket connection for the client.
-        
+
         Raises:
             Exception: If there is an error during the audio frame processing.
         """
@@ -156,6 +157,7 @@ class TranscriptionServer:
             port (int): The port number to bind the server.
         """
         with serve(self.recv_audio, host, port) as server:
+            logging.info(f"Server started at {host}:{port}")
             server.serve_forever()
 
 
@@ -215,12 +217,12 @@ class ServeClient:
         self.task = task
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.transcriber = WhisperModel(
-            "small" if multilingual else "small.en", 
+            "large-v2", #"small.en",
             device=device,
-            compute_type="int8" if device=="cpu" else "float16", 
+            compute_type="int8" if device=="cpu" else "float16",
             local_files_only=False,
         )
-        
+
         self.timestamp_offset = 0.0
         self.frames_np = None
         self.frames_offset = 0.0
@@ -251,7 +253,7 @@ class ServeClient:
                 }
             )
         )
-    
+
     def fill_output(self, output):
         """
         Format the current incomplete transcription output by combining it with previous complete segments.
@@ -266,7 +268,7 @@ class ServeClient:
 
         Args:
             output(str): The current incomplete transcription segment.
-        
+
         Returns:
             str: A formatted transcription wrapped in two lines.
         """
@@ -280,7 +282,7 @@ class ServeClient:
                 text += seg
         wrapped = "".join(text + output)
         return wrapped
-    
+
     def add_frames(self, frame_np):
         """
         Add audio frames to the ongoing audio stream buffer.
@@ -314,8 +316,8 @@ class ServeClient:
 
         If the client's language is not detected, it waits for 30 seconds of audio input to make a language prediction.
         It utilizes the Whisper ASR model to transcribe the audio, continuously processing and streaming results. Segments
-        are sent to the client in real-time, and a history of segments is maintained to provide context.Pauses in speech 
-        (no output from Whisper) are handled by showing the previous output for a set duration. A blank segment is added if 
+        are sent to the client in real-time, and a history of segments is maintained to provide context.Pauses in speech
+        (no output from Whisper) are handled by showing the previous output for a set duration. A blank segment is added if
         there is no speech for a specified duration to indicate a pause.
 
         Raises:
@@ -332,7 +334,7 @@ class ServeClient:
             duration = input_bytes.shape[0] / self.RATE
 
             self.language, lang_prob = self.transcriber.transcribe(
-                    input_bytes, 
+                    input_bytes,
                     initial_prompt=None,
                     language=self.language,
                     task=self.task
@@ -345,8 +347,8 @@ class ServeClient:
             if self.exit:
                 logging.info("Exiting speech to text thread")
                 break
-            
-            if self.frames_np is None: 
+
+            if self.frames_np is None:
                 continue
 
             # clip audio if the current chunk exceeds 30 seconds, this basically implies that
@@ -354,23 +356,23 @@ class ServeClient:
             if self.frames_np[int((self.timestamp_offset - self.frames_offset)*self.RATE):].shape[0] > 25 * self.RATE:
                 duration = self.frames_np.shape[0] / self.RATE
                 self.timestamp_offset = self.frames_offset + duration - 5
-    
+
             samples_take = max(0, (self.timestamp_offset - self.frames_offset)*self.RATE)
             input_bytes = self.frames_np[int(samples_take):].copy()
             duration = input_bytes.shape[0] / self.RATE
-            if duration<1.0: 
+            if duration<1.0:
                 continue
             try:
                 input_sample = input_bytes.copy()
                 # set previous complete segment as initial prompt
-                if len(self.text) and self.text[-1] != '': 
+                if len(self.text) and self.text[-1] != '':
                     initial_prompt = self.text[-1]
-                else: 
+                else:
                     initial_prompt = None
-                
+
                 # whisper transcribe with prompt
                 result = self.transcriber.transcribe(
-                    input_sample, 
+                    input_sample,
                     initial_prompt=initial_prompt,
                     language=self.language,
                     task=self.task
@@ -385,7 +387,7 @@ class ServeClient:
                         segments = self.transcript[-self.send_last_n_segments:]
                     if last_segment is not None:
                         segments = segments + [last_segment]
-                    
+
                     try:
                         self.websocket.send(
                             json.dumps({
@@ -404,7 +406,7 @@ class ServeClient:
                             segments = self.transcript
                         else:
                             segments = self.transcript[-self.send_last_n_segments:]
-                    
+
                     # add a blank if there is no speech for 3 seconds
                     if len(self.text) and self.text[-1] != '':
                         if time.time() - self.t_start > self.add_pause_thresh:
@@ -422,24 +424,24 @@ class ServeClient:
             except Exception as e:
                 logging.error(f"[ERROR]: {e}")
                 time.sleep(0.01)
-    
+
     def update_segments(self, segments, duration):
         """
         Processes the segments from whisper. Appends all the segments to the list
         except for the last segment assuming that it is incomplete.
 
         Updates the ongoing transcript with transcribed segments, including their start and end times.
-        Complete segments are appended to the transcript in chronological order. Incomplete segments 
-        (assumed to be the last one) are processed to identify repeated content. If the same incomplete 
+        Complete segments are appended to the transcript in chronological order. Incomplete segments
+        (assumed to be the last one) are processed to identify repeated content. If the same incomplete
         segment is seen multiple times, it updates the offset and appends the segment to the transcript.
         A threshold is used to detect repeated content and ensure it is only included once in the transcript.
-        The timestamp offset is updated based on the duration of processed segments. The method returns the 
+        The timestamp offset is updated based on the duration of processed segments. The method returns the
         last processed segment, allowing it to be sent to the client for real-time updates.
 
         Args:
             segments(dict) : dictionary of segments as returned by whisper
             duration(float): duration of the current chunk
-        
+
         Returns:
             dict or None: The last processed segment with its start time, end time, and transcribed text.
                      Returns None if there are no valid segments to process.
@@ -460,7 +462,7 @@ class ServeClient:
                         'text': text_
                     }
                 )
-                
+
                 offset = min(duration, s.end)
 
         self.current_out += segments[-1].text
@@ -469,16 +471,16 @@ class ServeClient:
             'end': self.timestamp_offset + min(duration, segments[-1].end),
             'text': self.current_out
         }
-        
+
         # if same incomplete segment is seen multiple times then update the offset
         # and append the segment to the list
-        if self.current_out.strip() == self.prev_out.strip() and self.current_out != '': 
+        if self.current_out.strip() == self.prev_out.strip() and self.current_out != '':
             self.same_output_threshold += 1
-        else: 
+        else:
             self.same_output_threshold = 0
-        
+
         if self.same_output_threshold > 5:
-            if not len(self.text) or self.text[-1].strip().lower()!=self.current_out.strip().lower():          
+            if not len(self.text) or self.text[-1].strip().lower()!=self.current_out.strip().lower():
                 self.text.append(self.current_out)
                 self.transcript.append(
                     {
@@ -493,13 +495,13 @@ class ServeClient:
             last_segment = None
         else:
             self.prev_out = self.current_out
-        
+
         # update offset
         if offset is not None:
             self.timestamp_offset += offset
 
         return last_segment
-    
+
     def disconnect(self):
         """
         Notify the client of disconnection and send a disconnect message.
@@ -516,7 +518,7 @@ class ServeClient:
                 }
             )
         )
-    
+
     def cleanup(self):
         """
         Perform cleanup tasks before exiting the transcription service.

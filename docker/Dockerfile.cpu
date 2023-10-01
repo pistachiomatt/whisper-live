@@ -24,7 +24,8 @@ RUN apt install software-properties-common -y && \
 
 RUN apt install python3-dev -y && \
     apt install python-is-python3
-    
+
+RUN apt-get install -y wget
 
 # install pip
 RUN apt install python3-pip -y

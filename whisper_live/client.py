@@ -22,7 +22,7 @@ def resample(file: str, sr: int = 16000):
     Args:
         file (str): The audio file to open
         sr (int): The sample rate to resample the audio if necessary
-    
+
     Returns:
         resampled_file (str): The resampled audio file
     """
@@ -87,6 +87,7 @@ class Client:
         self.timestamp_offset = 0.0
         self.audio_bytes = None
         self.p = pyaudio.PyAudio()
+        print("[INFO]: * initializing pyaudio")
         self.stream = self.p.open(
             format=self.format,
             channels=self.channels,
@@ -123,7 +124,7 @@ class Client:
     def on_message(self, ws, message):
         """
         Callback function called when a message is received from the server.
-        
+
         It updates various attributes of the client based on the received message, including
         recording status, language detection, and server messages. If a disconnect message
         is received, it sets the recording status to False.
@@ -195,7 +196,7 @@ class Client:
     def on_open(self, ws):
         """
         Callback function called when the WebSocket connection is successfully opened.
-        
+
         Sends an initial configuration message to the server, including client UID, multilingual mode,
         language selection, and task type.
 
@@ -221,8 +222,8 @@ class Client:
     def bytes_to_float_array(audio_bytes):
         """
         Convert audio data from bytes to a NumPy float array.
-        
-        It assumes that the audio data is in 16-bit PCM format. The audio data is normalized to 
+
+        It assumes that the audio data is in 16-bit PCM format. The audio data is normalized to
         have values between -1 and 1.
 
         Args:
@@ -250,10 +251,10 @@ class Client:
     def play_file(self, filename):
         """
         Play an audio file and send it to the server for processing.
-        
+
         Reads an audio file, plays it through the audio output, and simultaneously sends
-        the audio data to the server for processing. It uses PyAudio to create an audio 
-        stream for playback. The audio data is read from the file in chunks, converted to 
+        the audio data to the server for processing. It uses PyAudio to create an audio
+        stream for playback. The audio data is read from the file in chunks, converted to
         floating-point format, and sent to the server using WebSocket communication.
         This method is typically used when you want to process pre-recorded audio and send it
         to the server in real-time.
@@ -261,7 +262,7 @@ class Client:
         Args:
             filename (str): The path to the audio file to be played and sent to the server.
         """
-        
+
         # read audio and create pyaudio stream
         with wave.open(filename, "rb") as wavfile:
             self.stream = self.p.open(
@@ -287,7 +288,7 @@ class Client:
                 assert self.last_response_recieved
                 while time.time() - self.last_response_recieved < self.disconnect_if_no_response_for:
                     continue
-                self.stream.close()
+                # self.stream.close()
                 self.close_websocket()
 
             except KeyboardInterrupt:
@@ -302,7 +303,7 @@ class Client:
         """
         Close the WebSocket connection and join the WebSocket thread.
 
-        First attempts to close the WebSocket connection using `self.client_socket.close()`. After 
+        First attempts to close the WebSocket connection using `self.client_socket.close()`. After
         closing the connection, it joins the WebSocket thread to ensure proper termination.
 
         """
@@ -329,7 +330,7 @@ class Client:
         """
         Write audio frames to a WAV file.
 
-        The WAV file is created or overwritten with the specified name. The audio frames should be 
+        The WAV file is created or overwritten with the specified name. The audio frames should be
         in the correct format and match the specified channel, sample width, and sample rate.
 
         Args:
@@ -354,7 +355,7 @@ class Client:
 
         Audio data is saved in chunks to the "chunks" directory. Each chunk is saved as a separate WAV file.
         The recording will continue until the specified duration is reached or until the `RECORDING` flag is set to `False`.
-        The recording process can be interrupted by sending a KeyboardInterrupt (e.g., pressing Ctrl+C). After recording, 
+        The recording process can be interrupted by sending a KeyboardInterrupt (e.g., pressing Ctrl+C). After recording,
         the method combines all the saved audio chunks into the specified `out_file`.
 
         Args:
@@ -368,7 +369,14 @@ class Client:
             for _ in range(0, int(self.rate / self.chunk * self.record_seconds)):
                 if not self.recording:
                     break
-                data = self.stream.read(self.chunk)
+                try:
+                    data = self.stream.read(self.chunk, exception_on_overflow=False)
+                except OSError as e:
+                    if e.errno == -9981:
+                        print("[ERROR]: Input overflowed, skipping chunk")
+                        continue
+                    else:
+                        raise e
                 self.frames += data
 
                 audio_array = Client.bytes_to_float_array(data)
@@ -404,8 +412,8 @@ class Client:
     def write_output_recording(self, n_audio_file, out_file):
         """
         Combine and save recorded audio chunks into a single WAV file.
-        
-        The individual audio chunk files are expected to be located in the "chunks" directory. Reads each chunk 
+
+        The individual audio chunk files are expected to be located in the "chunks" directory. Reads each chunk
         file, appends its audio data to the final recording, and then deletes the chunk file. After combining
         and saving, the final recording is stored in the specified `out_file`.
 
@@ -469,12 +477,12 @@ class TranscriptionClient:
         Start the transcription process.
 
         Initiates the transcription process by connecting to the server via a WebSocket. It waits for the server
-        to be ready to receive audio data and then sends audio for transcription. If an audio file is provided, it 
+        to be ready to receive audio data and then sends audio for transcription. If an audio file is provided, it
         will be played and streamed to the server; otherwise, it will perform live recording.
 
         Args:
             audio (str, optional): Path to an audio file for transcription. Default is None, which triggers live recording.
-                   
+
         """
         print("[INFO]: Waiting for server ready ...")
         while not self.client.recording:
