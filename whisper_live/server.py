@@ -114,6 +114,11 @@ class TranscriptionServer:
         while True:
             try:
                 frame_data = websocket.recv()
+
+                if frame_data == "ping":
+                    websocket.send("pong")
+                    continue
+
                 frame_np = np.frombuffer(frame_data, dtype=np.float32)
 
                 try:
@@ -147,11 +152,6 @@ class TranscriptionServer:
                 logging.info(self.clients)
                 del websocket
                 break
-            finally:
-                if websocket in self.clients:
-                    self.clients[websocket].cleanup()
-                    self.clients.pop(websocket)
-                    self.clients_start_time.pop(websocket)
 
     def run(self, host, port=9090):
         """
