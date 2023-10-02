@@ -3,6 +3,7 @@
 import itertools
 import logging
 import os
+import types
 import zlib
 import logging
 
@@ -28,6 +29,7 @@ def get_logger():
     """Returns the module logger."""
     return logging.getLogger("faster_whisper")
 
+logging.basicConfig(level = logging.INFO)
 
 class Word(NamedTuple):
     start: float
@@ -508,7 +510,7 @@ class WhisperModel:
                         seek = previous_seek + seek_shift
 
             encoder_output = None
-            
+
             for segment in current_segments:
                 tokens = segment["tokens"]
                 text = tokenizer.decode(tokens)
@@ -775,7 +777,7 @@ class WhisperModel:
                 words, word_tokens, start_times, end_times, word_probabilities
             )
         ]
-    
+
     def destroy(self):
         del self.model
 

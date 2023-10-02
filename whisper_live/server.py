@@ -147,6 +147,11 @@ class TranscriptionServer:
                 logging.info(self.clients)
                 del websocket
                 break
+            finally:
+                if websocket in self.clients:
+                    self.clients[websocket].cleanup()
+                    self.clients.pop(websocket)
+                    self.clients_start_time.pop(websocket)
 
     def run(self, host, port=9090):
         """
@@ -337,7 +342,7 @@ class ServeClient:
                     input_bytes,
                     initial_prompt=None,
                     language=self.language,
-                    task=self.task
+                    task=self.task,
                 )
             logging.info(f"Detected language {self.language} with probability {lang_prob}")
             self.websocket.send(json.dumps(
@@ -375,7 +380,7 @@ class ServeClient:
                     input_sample,
                     initial_prompt=initial_prompt,
                     language=self.language,
-                    task=self.task
+                    task=self.task,
                 )
 
                 if len(result):
@@ -518,6 +523,7 @@ class ServeClient:
                 }
             )
         )
+        self.cleanup()
 
     def cleanup(self):
         """
